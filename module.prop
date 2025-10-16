@@ -1,6 +1,7 @@
-id=namewithouthieroglyphs
-name=Name Without Hieroglyphics (for GT 6 CN)
+id=NameWithoutHieroglyphics
+name=Name without Hieroglyphics for Realme Neo 7 (RMX5060)
 version=1.0
-versionCode=1
-author=Cookie01
-description=Удаление иероглифов в названии устройства по всей системе (Для realme GT 6 CN)
+versionCode=100
+author=YourName
+description=Fixes hieroglyphics in system props for realme Neo7 CN variant (RMX5060)
+updateJson=https://raw.githubusercontent.com/dmitthedazed/Name-without-Hieroglyphics-for-Realme-Neo7-RMX5060/main/update.json

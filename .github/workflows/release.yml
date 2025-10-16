@@ -1,0 +1,71 @@
+name: Auto Release Magisk Module
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get current version
+        id: get_version
+        run: |
+          version=$(grep '^version=' module.prop | cut -d'=' -f2)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Bump version
+        id: bump
+        run: |
+          old="${{ steps.get_version.outputs.version }}"
+          major=$(echo $old | cut -d. -f1)
+          minor=$(echo $old | cut -d. -f2)
+          # если minor не число, поставим zero
+          if ! [[ $minor =~ ^[0-9]+$ ]]; then minor=0; fi
+          new_minor=$((minor + 1))
+          new="$major.$new_minor"
+          echo "New version: $new"
+
+          # versionCode = major*100 + new_minor
+          new_code=$((major * 100 + new_minor))
+
+          sed -i "s/^version=.*/version=$new/" module.prop
+          sed -i "s/^versionCode=.*/versionCode=$new_code/" module.prop
+
+          # Формируем ZIP
+          zip -r module-$new.zip META-INF module.prop system.prop
+
+          # Обновляем update.json
+          cat <<EOF > update.json
+{
+  "version": "$new",
+  "versionCode": $new_code,
+  "zipUrl": "https://github.com/${{ github.repository }}/releases/latest/download/module-$new.zip",
+  "changelog": "Automatic release $new"
+}
+EOF
+
+          echo "new_version=$new" >> $GITHUB_OUTPUT
+          echo "new_code=$new_code" >> $GITHUB_OUTPUT
+
+      - name: Commit changes
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "github-actions"
+          git add module.prop update.json
+          git commit -m "Auto bump to ${{ steps.bump.outputs.new_version }}"
+          git push
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.new_version }}
+          name: "v${{ steps.bump.outputs.new_version }}"
+          files: module-${{ steps.bump.outputs.new_version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
