@@ -1,0 +1,131 @@
+name: Build and Release Magisk Module
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.github/**'
+      - 'update.json'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get current version
+        id: get_version
+        run: |
+          VERSION=$(grep '^version=' module.prop | cut -d'=' -f2)
+          VERSIONCODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2)
+          echo "Current version: $VERSION"
+          echo "Current versionCode: $VERSIONCODE"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "versioncode=$VERSIONCODE" >> $GITHUB_OUTPUT
+
+      - name: Increment version
+        id: increment
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          VERSIONCODE="${{ steps.get_version.outputs.versioncode }}"
+          
+          # Increment version by 0.1
+          NEW_VERSION=$(echo "$VERSION + 0.1" | bc)
+          NEW_VERSIONCODE=$((VERSIONCODE + 10))
+          
+          echo "New version: $NEW_VERSION"
+          echo "New versionCode: $NEW_VERSIONCODE"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new_versioncode=$NEW_VERSIONCODE" >> $GITHUB_OUTPUT
+
+      - name: Update module.prop
+        run: |
+          sed -i "s/^version=.*/version=${{ steps.increment.outputs.new_version }}/" module.prop
+          sed -i "s/^versionCode=.*/versionCode=${{ steps.increment.outputs.new_versioncode }}/" module.prop
+          cat module.prop
+
+      - name: Create module structure
+        run: |
+          mkdir -p build/NameWithoutHieroglyphics
+          cp module.prop build/NameWithoutHieroglyphics/
+          cp system.prop build/NameWithoutHieroglyphics/
+          
+          # Create system/vendor/build.prop structure
+          mkdir -p build/NameWithoutHieroglyphics/system/vendor
+          cp system.prop build/NameWithoutHieroglyphics/system/vendor/build.prop
+
+      - name: Create ZIP
+        run: |
+          cd build/NameWithoutHieroglyphics
+          zip -r ../../NameWithoutHieroglyphics-v${{ steps.increment.outputs.new_version }}.zip .
+          cd ../..
+          
+      - name: Generate changelog
+        id: changelog
+        run: |
+          CHANGELOG=$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD || echo "- Initial release")
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.increment.outputs.new_version }}
+          release_name: Release v${{ steps.increment.outputs.new_version }}
+          body: |
+            ## Name without Hieroglyphics for Realme Neo7 (RMX5060)
+            
+            **Version:** ${{ steps.increment.outputs.new_version }}
+            **Version Code:** ${{ steps.increment.outputs.new_versioncode }}
+            
+            ### Changes
+            ${{ steps.changelog.outputs.changelog }}
+            
+            ### Installation
+            1. Download the ZIP file below
+            2. Flash via Magisk Manager
+            3. Reboot your device
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./NameWithoutHieroglyphics-v${{ steps.increment.outputs.new_version }}.zip
+          asset_name: NameWithoutHieroglyphics-v${{ steps.increment.outputs.new_version }}.zip
+          asset_content_type: application/zip
+
+      - name: Update update.json
+        run: |
+          cat > update.json << EOF
+          {
+            "version": "${{ steps.increment.outputs.new_version }}",
+            "versionCode": ${{ steps.increment.outputs.new_versioncode }},
+            "zipUrl": "https://github.com/dmitthedazed/Name-without-Hieroglyphics-for-Realme-Neo7-RMX5060/releases/download/v${{ steps.increment.outputs.new_version }}/NameWithoutHieroglyphics-v${{ steps.increment.outputs.new_version }}.zip",
+            "changelog": "https://github.com/dmitthedazed/Name-without-Hieroglyphics-for-Realme-Neo7-RMX5060/releases/tag/v${{ steps.increment.outputs.new_version }}"
+          }
+          EOF
+          cat update.json
+
+      - name: Commit version bump and update.json
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add module.prop update.json
+          git commit -m "Bump version to ${{ steps.increment.outputs.new_version }} [skip ci]" || echo "No changes to commit"
+          git push || echo "Nothing to push"
