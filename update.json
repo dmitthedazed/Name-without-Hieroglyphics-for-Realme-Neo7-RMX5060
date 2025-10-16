@@ -1,6 +1,0 @@
-{
-  "version": "1.0",
-  "versionCode": 100,
-  "zipUrl": "https://github.com/dmitthedazed/Name-without-Hieroglyphics-for-Realme-Neo7-RMX5060/releases/latest/download/module-1.0.zip",
-  "changelog": "Initial release — removes Chinese characters from device names for realme Neo7 (RMX5060)."
-}
