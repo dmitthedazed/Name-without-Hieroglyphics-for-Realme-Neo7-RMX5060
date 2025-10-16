@@ -1,0 +1,144 @@
+name: Bump version and release Magisk module
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_step:
+        description: "Version increment step (e.g. 0.1)"
+        required: false
+        default: "0.1"
+      dry_run:
+        description: "If true, don't push or create a release"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  bump-build-release:
+    runs-on: ubuntu-latest
+    env:
+      MODULE_DIR: Name-Without-Hieroglyphics-for-Neo7-CN
+      ZIP_BASENAME: Name-Without-Hieroglyphics-for-Neo7-CN
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Read current version and versionCode
+        id: read
+        run: |
+          PROP_FILE="$MODULE_DIR/module.prop"
+          if [ ! -f "$PROP_FILE" ]; then
+            echo "module.prop not found at $PROP_FILE" >&2
+            exit 1
+          fi
+          CURR_VER=$(grep -E '^version=' "$PROP_FILE" | head -n1 | cut -d'=' -f2- | tr -d ' \t\r')
+          CURR_CODE=$(grep -E '^versionCode=' "$PROP_FILE" | head -n1 | cut -d'=' -f2- | tr -d ' \t\r')
+          echo "current_version=$CURR_VER" >> "$GITHUB_OUTPUT"
+          echo "current_code=$CURR_CODE" >> "$GITHUB_OUTPUT"
+          echo "Detected version=$CURR_VER, versionCode=$CURR_CODE"
+
+      - name: Bump version and versionCode
+        id: bump
+        run: |
+          STEP="${{ github.event.inputs.bump_step || '0.1' }}"
+          PROP_FILE="$MODULE_DIR/module.prop"
+
+          CURR_VER="${{ steps.read.outputs.current_version }}"
+          CURR_CODE="${{ steps.read.outputs.current_code }}"
+
+          # Validate current values: version as decimal and versionCode as integer
+          if ! echo "$CURR_VER" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then
+            echo "Version '$CURR_VER' is not a simple decimal number (e.g., 1.0)" >&2
+            exit 2
+          fi
+          if ! echo "$CURR_CODE" | grep -Eq '^[0-9]+$'; then
+            echo "versionCode '$CURR_CODE' is not an integer" >&2
+            exit 2
+          fi
+
+          # Calculate new version using Python's Decimal to avoid float issues
+          NEW_VER=$(python3 -c "from decimal import Decimal; import sys; v=Decimal(sys.argv[1]); step=Decimal(sys.argv[2]); print((v+step).quantize(Decimal('0.1')))" "$CURR_VER" "$STEP")
+
+          NEW_CODE=$(( CURR_CODE + 1 ))
+
+          echo "new_version=$NEW_VER" >> "$GITHUB_OUTPUT"
+          echo "new_code=$NEW_CODE" >> "$GITHUB_OUTPUT"
+
+          # Update module.prop in-place
+          sed -i "s/^version=.*/version=$NEW_VER/" "$PROP_FILE"
+          sed -i "s/^versionCode=.*/versionCode=$NEW_CODE/" "$PROP_FILE"
+
+          echo "Bumped version: $CURR_VER -> $NEW_VER"
+          echo "Bumped versionCode: $CURR_CODE -> $NEW_CODE"
+
+      - name: Commit changes and tag
+        id: commit
+        run: |
+          DRY=${{ github.event.inputs.dry_run || 'false' }}
+          NEW_VER=${{ steps.bump.outputs.new_version }}
+          NEW_CODE=${{ steps.bump.outputs.new_code }}
+          set -e
+          if ! git diff --quiet; then
+            git add "${MODULE_DIR}/module.prop"
+            git commit -m "chore: bump version to ${NEW_VER} (code ${NEW_CODE})"
+          else
+            echo "No changes to commit"
+          fi
+          TAG="v${NEW_VER}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "$DRY" != "true" ]; then
+            # push commit and tag
+            git push
+            # create or move tag to latest commit
+            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+              git tag -d "$TAG"
+            fi
+            git tag "$TAG"
+            git push --force origin "$TAG"
+          else
+            echo "Dry run: skipping push and tag"
+          fi
+
+      - name: Build Magisk module zip
+        id: build
+        run: |
+          NEW_VER=${{ steps.bump.outputs.new_version }}
+          ZIP_NAME="${ZIP_BASENAME}-v${NEW_VER}.zip"
+          # Ensure updater binary is executable
+          chmod +x "$MODULE_DIR/META-INF/com/google/android/update-binary" || true
+          cd "$MODULE_DIR"
+          # Zip the CONTENTS of the module folder so files are at the root of the ZIP
+          zip -r -9 -X "../$ZIP_NAME" . -x "*.DS_Store" "*.git*" "*.github*"
+          cd -
+          echo "zip_path=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "Built $ZIP_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: magisk-module
+          path: ${{ steps.build.outputs.zip_path }}
+
+      - name: Create GitHub Release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.commit.outputs.tag }}
+          name: Release ${{ steps.commit.outputs.tag }}
+          body: |
+            Automated release for ${{ steps.commit.outputs.tag }}
+
+            Changes:
+            - Bump version to ${{ steps.bump.outputs.new_version }}
+            - Bump versionCode to ${{ steps.bump.outputs.new_code }}
+          files: |
+            ${{ steps.build.outputs.zip_path }}

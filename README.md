@@ -125,3 +125,18 @@ This project is open source. Feel free to modify and distribute according to you
 
 **⚠️ Disclaimer**: This module modifies system properties. Use at your own risk. The author is not responsible for any damage to your device.
 
+
+## 🚀 Maintainers: How to publish a new release
+
+This repo includes an automated workflow to bump the version, build the Magisk module ZIP, and publish a GitHub Release.
+
+- Trigger it manually: Actions > "Bump version and release Magisk module" > Run workflow
+- Optional inputs:
+	- bump_step: Defaults to 0.1 (e.g., 1.0 -> 1.1)
+	- dry_run: Set to true to preview without pushing or releasing
+- What it does:
+	- Reads and bumps `version` by the step and increments `versionCode` by 1 in `Name-Without-Hieroglyphics-for-Neo7-CN/module.prop`
+	- Commits and tags the change (tag format: vX.Y)
+	- Packages the module as a ZIP with correct folder structure
+	- Uploads the ZIP as an artifact and attaches it to the GitHub Release
+
